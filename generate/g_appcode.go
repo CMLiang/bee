@@ -11,6 +11,7 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations
 // under the License.
+//first push
 
 package generate
 
@@ -450,10 +451,11 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 		if table.Pk == colName {
 			col.Name = "Id"
 			col.Type = "int"
+			tag.Pk = true
 			if extra == "auto_increment" {
 				tag.Auto = true
 			} else {
-				tag.Pk = true
+				tag.Auto = false
 			}
 		} else {
 			fkCol, isFk := table.Fk[colName]
