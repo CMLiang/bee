@@ -149,6 +149,20 @@ type Table struct {
 	ImportTimePkg bool
 }
 
+var trlist []TableRelation
+
+// TableRelation represent a relationships between tables
+type TableRelation struct {
+	SourceName   string
+	RelationName string
+	RelOne       bool
+	ReverseOne   bool
+	RelO2M       bool
+	ReverseMany  bool
+	RelM2M       bool
+	IsCorrect    bool
+}
+
 // Column reprsents a column for a table
 type Column struct {
 	Name string
@@ -413,6 +427,15 @@ func (*MysqlDB) GetConstraints(db *sql.DB, table *Table, blackList map[string]bo
 // GetColumns retrieves columns details from
 // information_schema and fill in the Column struct
 func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[string]bool) {
+	if strings.Contains(table.Name, "_has_") {
+		trm2m := new(TableRelation)
+		trm2m.SourceName = table.Name[0:strings.LastIndex(table.Name, "_has_")]
+		trm2m.RelationName = table.Name[strings.LastIndex(table.Name, "_has_"):len(table.Name)]
+		trm2m.RelM2M = true
+		trm2m.ReverseMany = true
+		trlist = append(trlist, *trm2m)
+	}
+
 	// retrieve columns
 	colDefRows, err := db.Query(
 		`SELECT
@@ -428,6 +451,18 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 	defer colDefRows.Close()
 
 	for colDefRows.Next() {
+		var trFlag bool = false
+		//The initial table relationship
+		tr := TableRelation{
+			SourceName:   table.Name,
+			RelationName: "inexistence",
+			RelOne:       false,
+			ReverseOne:   false,
+			RelO2M:       false,
+			ReverseMany:  false,
+			RelM2M:       false,
+			IsCorrect:    true,
+		}
 		// datatype as bytes so that SQL <null> values can be retrieved
 		var colNameBytes, dataTypeBytes, columnTypeBytes, isNullableBytes, columnDefaultBytes, extraBytes, columnCommentBytes []byte
 		if err := colDefRows.Scan(&colNameBytes, &dataTypeBytes, &columnTypeBytes, &isNullableBytes, &columnDefaultBytes, &extraBytes, &columnCommentBytes); err != nil {
@@ -511,8 +546,30 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 				}
 			}
 		}
+		if !strings.Contains(table.Name, "_has_") {
+			//表中含_id结尾的字段，约定_id前的编码为表编码
+			//如表profile中有user_id字段，则RelationName的值取user
+			//后续会校验是否存在对应表
+			if strings.HasSuffix(col.Name, "_id") {
+				tr.RelationName = col.Name[0:strings.LastIndex(col.Name, "_id")]
+				tr.RelOne = true
+				tr.ReverseOne = true
+				trFlag = true
+			} else if strings.HasSuffix(col.Name, "_ids") {
+				//同上，判断_ids结尾的为从表。
+				tr.RelationName = col.Name[0:strings.LastIndex(col.Name, "_ids")]
+				tr.RelO2M = true
+				tr.ReverseMany = true
+				trFlag = true
+			}
+		}
 		col.Tag = tag
 		table.Columns = append(table.Columns, col)
+		if trFlag {
+			fmt.Println(tr)
+			trlist = append(trlist, tr)
+			fmt.Println(trlist)
+		}
 	}
 }
 
