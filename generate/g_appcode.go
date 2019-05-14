@@ -755,7 +755,7 @@ func writeModelFiles(tables []*Table, mPath string) {
 		var f *os.File
 		var err error
 		if utils.IsExist(fpath) {
-			beeLogger.Log.Warnf("'%s' already exists. Do you want to overwrite it? [Yes|No] ", fpath)
+			beeLogger.Log.Warnf("'%s' already exists. Do you want to overwrite it? [Y|N] ", fpath)
 			if utils.AskForConfirmation() {
 				f, err = os.OpenFile(fpath, os.O_RDWR|os.O_TRUNC, 0666)
 				if err != nil {
@@ -814,7 +814,7 @@ func writeControllerFiles(tables []*Table, cPath string, pkgPath string) {
 		var f *os.File
 		var err error
 		if utils.IsExist(fpath) {
-			beeLogger.Log.Warnf("'%s' already exists. Do you want to overwrite it? [Yes|No] ", fpath)
+			beeLogger.Log.Warnf("'%s' already exists. Do you want to overwrite it? [Y|N] ", fpath)
 			if utils.AskForConfirmation() {
 				f, err = os.OpenFile(fpath, os.O_RDWR|os.O_TRUNC, 0666)
 				if err != nil {
