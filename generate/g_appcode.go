@@ -573,17 +573,17 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 			}
 		}
 		if !strings.Contains(table.Name, "_has_") {
-			//表中含_id结尾的字段，约定_id前的编码为表编码
-			//如表profile中有user_id字段，则RelationName的值取user
+			//表中含_extend结尾的字段，约定_extend前的编码为表编码，该表为扩展表
+			//如表profile中有user_extend字段，则RelationName的值取user
 			//后续会校验是否存在对应表
-			if strings.HasSuffix(colName, "_id") {
-				tr.RelationName = colName[0:strings.LastIndex(colName, "_id")]
+			if strings.HasSuffix(colName, "_extend") {
+				tr.RelationName = colName[0:strings.LastIndex(colName, "_extend")]
 				tr.RelOne = true
 				tr.ReverseOne = true
 				trFlag = true
-			} else if strings.HasSuffix(colName, "_ids") {
-				//同上，判断_ids结尾的为从表。
-				tr.RelationName = colName[0:strings.LastIndex(colName, "_ids")]
+			} else if strings.HasSuffix(colName, "_id") {
+				//同上，表中含_id结尾的字段，约定判断_id前的编码为表编码，该表为从表。
+				tr.RelationName = colName[0:strings.LastIndex(colName, "_id")]
 				tr.RelO2M = true
 				tr.ReverseMany = true
 				trFlag = true
@@ -616,35 +616,35 @@ func GetRelationColumns(table *Table, tr TableRelation, getDirection int8) {
 	if getDirection == 1 {
 		//如果为正向，则取RelationName为字段名
 		rcol.Name = utils.CamelCase(tr.RelationName)
-		if tr.RelOne {
+		if tr.ReverseOne {
 			rcol.Type = "*" + utils.CamelCase(tr.RelationName)
-			tag.Comment = "设置与" + tr.RelationName + "一对一关系，该表为扩展表，字段：" + tr.RelationName + "_id为关联字段。"
-			tag.RelOne = true
+			tag.Comment = "设置与" + tr.SourceName + "一对一关系，该表为扩展表，字段：" + tr.SourceName + "_extend为关联字段。"
+			tag.ReverseOne = true
 		} else if tr.RelO2M {
 			rcol.Type = "*" + utils.CamelCase(tr.RelationName)
-			tag.Comment = "设置与" + tr.RelationName + "一对多关系，该表为从表，字段：" + tr.RelationName + "_ids为关联字段。"
+			tag.Comment = "设置与" + tr.RelationName + "一对多关系，该表为从表，字段：" + tr.RelationName + "_id为关联字段。"
 			tag.RelFk = true
-		} else if tr.RelM2M {
+		} else if tr.ReverseMany {
 			rcol.Name = rcol.Name + "s"
 			rcol.Type = "[]*" + utils.CamelCase(tr.RelationName)
 			tag.Comment = "设置与" + tr.RelationName + "多对多关系，中间表：" + tr.SourceName + "_has_" + tr.RelationName
-			tag.RelM2M = true
+			tag.ReverseMany = true
 		}
 	} else if getDirection == -1 {
 		rcol.Name = utils.CamelCase(tr.SourceName)
-		if tr.ReverseOne {
+		if tr.RelOne {
 			rcol.Type = "*" + utils.CamelCase(tr.SourceName)
 			tag.Comment = "设置与" + tr.SourceName + "一对一关系，该表为主表，字段：id为关联字段。"
-			tag.ReverseOne = true
+			tag.RelOne = true
+		} else if tr.RelM2M {
+			rcol.Name = rcol.Name + "s"
+			rcol.Type = "[]*" + utils.CamelCase(tr.SourceName)
+			tag.Comment = "设置与" + tr.SourceName + "多对多关系，中间表：" + tr.SourceName + "_has_" + tr.RelationName
+			tag.RelM2M = true
 		} else if tr.ReverseMany {
 			rcol.Name = rcol.Name + "s"
 			rcol.Type = "[]*" + utils.CamelCase(tr.SourceName)
 			tag.Comment = "设置与" + tr.SourceName + "一对多关系，该表为主表，字段：id为关联字段。"
-			tag.ReverseMany = true
-		} else if tr.ReverseMany {
-			rcol.Name = rcol.Name + "s"
-			rcol.Type = "[]*" + utils.CamelCase(tr.SourceName)
-			tag.Comment = "设置与" + tr.SourceName + "多对多关系，中间表：" + tr.SourceName + "_has_" + tr.RelationName
 			tag.ReverseMany = true
 		}
 	}
