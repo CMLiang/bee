@@ -148,6 +148,9 @@ type Table struct {
 	Fk            map[string]*ForeignKey
 	Columns       []*Column
 	ImportTimePkg bool
+	one2one       []string
+	one2many      map[string]string
+	m2m           map[string]string
 }
 
 var trlist []TableRelation
@@ -405,7 +408,7 @@ func getTableObjects(tableNames []string, db *sql.DB, dbTransformer DbTransforme
 		//判断健是否存在
 		if _, ok := trmap[tr.SourceName+tr.RelationName]; ok {
 			//如果键存在，判断MarkName的值是否为one2many
-			//如果是，则替换；如果不是
+			//如果是，则替换；如果不是，则不处理
 			if trmap[tr.SourceName+tr.RelationName].MarkName == "one2many" {
 				trmap[tr.SourceName+tr.RelationName] = tr
 			}
@@ -423,7 +426,9 @@ func getTableObjects(tableNames []string, db *sql.DB, dbTransformer DbTransforme
 			var correcttr = tr
 			// correcttr.IsCorrect = true
 			if tb.Name == tr.RelationName {
-				GetRelationColumns(tb, tr, -1)
+				if !strings.Contains(tr.SourceName, "_has_") {
+					GetRelationColumns(tb, tr, -1)
+				}
 				correcttr.IsCorrect = true
 			}
 			correcttrlist = append(correcttrlist, correcttr)
@@ -632,7 +637,6 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 		} else {
 			if strings.HasSuffix(colName, "_id") {
 				//同上，中间表中含_id结尾的字段，约定判断_id前的编码为表编码，该表为从表。
-
 				tr.MarkName = "one2many"
 				tr.RelationName = colName[0:strings.LastIndex(colName, "_id")]
 				tr.RelO2M = true
@@ -706,10 +710,19 @@ func GetRelationColumns(table *Table, tr TableRelation, getDirection int8) {
 			tag.ReverseMany = true
 		}
 	}
+	table.one2one = append(table.one2one, rcol.Name)
 	// fmt.Println(tr)
 	// fmt.Println(tag.Comment)
 	rcol.Tag = tag
 	table.Columns = append(table.Columns, rcol)
+}
+
+func RelationDealNil(l []string) string {
+	var ls string
+	for _, v := range l {
+		ls += "v." + v + "=nil\n"
+	}
+	return ls
 }
 
 // GetGoDataType maps an SQL data type to Golang data type
@@ -969,6 +982,8 @@ func writeModelFiles(tables []*Table, mPath string) {
 				continue
 			}
 		}
+		var dealNil = RelationDealNil(tb.one2one)
+		fmt.Println(tb.one2one)
 		var template string
 		if tb.Pk == "" {
 			template = StructModelTPL
@@ -978,6 +993,7 @@ func writeModelFiles(tables []*Table, mPath string) {
 		fileStr := strings.Replace(template, "{{modelStruct}}", tb.String(), 1)
 		fileStr = strings.Replace(fileStr, "{{modelName}}", utils.CamelCase(tb.Name), -1)
 		fileStr = strings.Replace(fileStr, "{{tableName}}", tb.Name, -1)
+		fileStr = strings.Replace(fileStr, "{{relationDealWithNil}}", dealNil, -1)
 
 		// If table contains time field, import time.Time package
 		timePkg := ""
@@ -1218,7 +1234,7 @@ func Get{{modelName}}ById(id int) (v *{{modelName}}, err error) {
 	v = &{{modelName}}{Id: id}
 	if err = o.Read(v); err == nil {
 		//e.g.关联字段（结构）赋nil，避免取到默认值
-		{{relationBestowNil}}
+		{{relationDealWithNil}}
 		return v, nil
 	}
 	return nil, err
@@ -1285,14 +1301,14 @@ func GetAll{{modelName}}(query map[string]string, fields []string, sortby []stri
 		if len(fields) == 0 {
 			for _, v := range l {
 				//e.g.关联字段（结构）赋nil，避免取到默认值
-				{{relationBestowNil}}
+				{{relationDealWithNil}}
 				ml = append(ml, v)
 			}
 		} else {
 			// trim unused fields
 			for _, v := range l {
 				//e.g.关联字段（结构）赋nil，避免取到默认值
-				{{relationBestowNil}}
+				{{relationDealWithNil}}
 				m := make(map[string]interface{})
 				val := reflect.ValueOf(v)
 				for _, fname := range fields {
