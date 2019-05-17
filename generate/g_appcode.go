@@ -151,10 +151,12 @@ type Table struct {
 }
 
 var trlist []TableRelation
+var trmap = make(map[string]TableRelation)
 var correcttrlist []TableRelation
 
 // TableRelation represent a relationships between tables
 type TableRelation struct {
+	MarkName     string
 	SourceName   string
 	RelationName string
 	RelOne       bool
@@ -163,6 +165,7 @@ type TableRelation struct {
 	ReverseMany  bool
 	RelM2M       bool
 	IsCorrect    bool
+	M2MThroungh  string
 }
 
 // Column reprsents a column for a table
@@ -201,6 +204,8 @@ type OrmTag struct {
 	ReverseMany bool
 	RelM2M      bool
 	Comment     string //column comment
+	JsonHide    bool
+	M2MThroungh string
 }
 
 // String returns the source code string for the Table struct
@@ -260,6 +265,7 @@ func (tag *OrmTag) String() string {
 	}
 	if tag.RelM2M {
 		ormOptions = append(ormOptions, "rel(m2m)")
+		ormOptions = append(ormOptions, "rel_table("+tag.M2MThroungh+")")
 	}
 	if tag.Pk {
 		ormOptions = append(ormOptions, "pk")
@@ -276,8 +282,22 @@ func (tag *OrmTag) String() string {
 	}
 	if tag.Comment != "" {
 		return fmt.Sprintf("`orm:\"%s\" description:\"%s\"`", strings.Join(ormOptions, ";"), tag.Comment)
+	} else {
+		return fmt.Sprintf("`orm:\"%s\"`", strings.Join(ormOptions, ";"))
 	}
-	return fmt.Sprintf("`orm:\"%s\"`", strings.Join(ormOptions, ";"))
+	// 如关系字段默认不输出，则在Tag中增加json:"-"
+	// if tag.Comment != "" {
+	// 	if tag.JsonHide {
+	// 		return fmt.Sprintf("`orm:\"%s\" description:\"%s\"`", strings.Join(ormOptions, ";")+"\" json:"+"\"-", tag.Comment)
+	// 	} else {
+	// 		return fmt.Sprintf("`orm:\"%s\" description:\"%s\"`", strings.Join(ormOptions, ";"), tag.Comment)
+	// 	}
+	// }
+	// if tag.JsonHide {
+	// 	return fmt.Sprintf("`orm:\"%s\"`", strings.Join(ormOptions, ";")+"\" json:"+"\"-")
+	// } else {
+	// 	return fmt.Sprintf("`orm:\"%s\"`", strings.Join(ormOptions, ";"))
+	// }
 }
 
 func GenerateAppcode(driver, connStr, level, tables, currpath string) {
@@ -379,10 +399,27 @@ func getTableObjects(tableNames []string, db *sql.DB, dbTransformer DbTransforme
 	}
 
 	// fmt.Println(trlist)
+	//因为一对一关系的关联字段也是_id，且_one用于标识一对一关系时也增加tr，所以需要对list去重
+	//以关联表明为key去重
+	for _, tr := range trlist {
+		//判断健是否存在
+		if _, ok := trmap[tr.SourceName+tr.RelationName]; ok {
+			//如果键存在，判断MarkName的值是否为one2many
+			//如果是，则替换；如果不是
+			if trmap[tr.SourceName+tr.RelationName].MarkName == "one2many" {
+				trmap[tr.SourceName+tr.RelationName] = tr
+			}
+		} else {
+			trmap[tr.SourceName+tr.RelationName] = tr
+		}
+	}
+	// fmt.Println(trmap)
+
+	// fmt.Println(trlist)
 	for _, tb := range tables {
-		//先处理逆向的关系，如找到RelationName，进入处理
+		//先处理逆向的关系，如所有表中找到名为RelationName的表，进入处理
 		//TableRelation中的isCorrect会被置为True
-		for _, tr := range trlist {
+		for _, tr := range trmap {
 			var correcttr = tr
 			// correcttr.IsCorrect = true
 			if tb.Name == tr.RelationName {
@@ -455,6 +492,8 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 	//表间多对多关系约定为中间表（MySQL model约定）
 	if strings.Contains(table.Name, "_has_") && len(table.Name) > 5 {
 		trm2m := new(TableRelation)
+		trm2m.M2MThroungh = table.Name
+		trm2m.MarkName = "m2m"
 		trm2m.SourceName = table.Name[0:strings.LastIndex(table.Name, "_has_")]
 		trm2m.RelationName = table.Name[strings.LastIndex(table.Name, "_has_")+5 : len(table.Name)]
 		trm2m.RelM2M = true
@@ -478,9 +517,17 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 	defer colDefRows.Close()
 
 	for colDefRows.Next() {
+		// datatype as bytes so that SQL <null> values can be retrieved
+		var colNameBytes, dataTypeBytes, columnTypeBytes, isNullableBytes, columnDefaultBytes, extraBytes, columnCommentBytes []byte
+		if err := colDefRows.Scan(&colNameBytes, &dataTypeBytes, &columnTypeBytes, &isNullableBytes, &columnDefaultBytes, &extraBytes, &columnCommentBytes); err != nil {
+			beeLogger.Log.Fatal("Could not query INFORMATION_SCHEMA for column information")
+		}
+		colName, dataType, columnType, isNullable, columnDefault, extra, columnComment :=
+			string(colNameBytes), string(dataTypeBytes), string(columnTypeBytes), string(isNullableBytes), string(columnDefaultBytes), string(extraBytes), string(columnCommentBytes)
 		var trFlag bool = false
 		//The initial table relationship
 		tr := new(TableRelation)
+		tr.MarkName = "default"
 		tr.SourceName = table.Name
 		tr.RelationName = "inexistence"
 		tr.RelOne = false
@@ -489,14 +536,6 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 		tr.ReverseMany = false
 		tr.RelM2M = false
 		tr.IsCorrect = false
-		// datatype as bytes so that SQL <null> values can be retrieved
-		var colNameBytes, dataTypeBytes, columnTypeBytes, isNullableBytes, columnDefaultBytes, extraBytes, columnCommentBytes []byte
-		if err := colDefRows.Scan(&colNameBytes, &dataTypeBytes, &columnTypeBytes, &isNullableBytes, &columnDefaultBytes, &extraBytes, &columnCommentBytes); err != nil {
-			beeLogger.Log.Fatal("Could not query INFORMATION_SCHEMA for column information")
-		}
-		colName, dataType, columnType, isNullable, columnDefault, extra, columnComment :=
-			string(colNameBytes), string(dataTypeBytes), string(columnTypeBytes), string(isNullableBytes), string(columnDefaultBytes), string(extraBytes), string(columnCommentBytes)
-
 		// create a column
 		col := new(Column)
 		col.Name = utils.CamelCase(colName)
@@ -573,27 +612,40 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 			}
 		}
 		if !strings.Contains(table.Name, "_has_") {
-			//表中含_extend结尾的字段，约定_extend前的编码为表编码，该表为扩展表
-			//如表profile中有user_extend字段，则RelationName的值取user
+			//表中含_one结尾的字段，约定_one前的编码为表编码，该表为扩展表
+			//如表profile中有user_one字段，则RelationName的值取user
 			//后续会校验是否存在对应表
-			if strings.HasSuffix(colName, "_extend") {
-				tr.RelationName = colName[0:strings.LastIndex(colName, "_extend")]
+			if strings.HasSuffix(colName, "_one") {
+				tr.MarkName = "one2one"
+				tr.RelationName = colName[0:strings.LastIndex(colName, "_one")]
 				tr.RelOne = true
 				tr.ReverseOne = true
 				trFlag = true
 			} else if strings.HasSuffix(colName, "_id") {
 				//同上，表中含_id结尾的字段，约定判断_id前的编码为表编码，该表为从表。
+				tr.MarkName = "one2many"
 				tr.RelationName = colName[0:strings.LastIndex(colName, "_id")]
 				tr.RelO2M = true
 				tr.ReverseMany = true
 				trFlag = true
 			}
+		} else {
+			if strings.HasSuffix(colName, "_id") {
+				//同上，中间表中含_id结尾的字段，约定判断_id前的编码为表编码，该表为从表。
+
+				tr.MarkName = "one2many"
+				tr.RelationName = colName[0:strings.LastIndex(colName, "_id")]
+				tr.RelO2M = true
+				tr.ReverseMany = false
+				trFlag = true
+			}
 		}
-		col.Tag = tag
-		table.Columns = append(table.Columns, col)
 		if trFlag {
 			// fmt.Println(tr)
 			trlist = append(trlist, *tr)
+		} else {
+			col.Tag = tag
+			table.Columns = append(table.Columns, col)
 		}
 	}
 }
@@ -613,33 +665,39 @@ func GetRelationColumns(table *Table, tr TableRelation, getDirection int8) {
 	tag.Pk = false
 	tag.Null = true
 	tag.Unique = false
+	tag.JsonHide = true
 	if getDirection == 1 {
 		//如果为正向，则取RelationName为字段名
 		rcol.Name = utils.CamelCase(tr.RelationName)
-		if tr.ReverseOne {
+		if tr.RelOne {
 			rcol.Type = "*" + utils.CamelCase(tr.RelationName)
-			tag.Comment = "设置与" + tr.SourceName + "一对一关系，该表为扩展表，字段：" + tr.SourceName + "_extend为关联字段。"
-			tag.ReverseOne = true
+			tag.Comment = "设置与" + tr.RelationName + "一对一关系，该表为主表，字段：" + tr.RelationName + "_id为关联字段。"
+			tag.RelOne = true
 		} else if tr.RelO2M {
 			rcol.Type = "*" + utils.CamelCase(tr.RelationName)
-			tag.Comment = "设置与" + tr.RelationName + "一对多关系，该表为从表，字段：" + tr.RelationName + "_id为关联字段。"
 			tag.RelFk = true
+			if strings.Contains(tr.SourceName, "_has_") {
+				tag.Comment = tr.RelationName + "_id为中间表关联字段。"
+			} else {
+				tag.Comment = "设置与" + tr.RelationName + "一对多关系，该表为从表，字段：" + tr.RelationName + "_id为关联字段。"
+			}
 		} else if tr.ReverseMany {
 			rcol.Name = rcol.Name + "s"
 			rcol.Type = "[]*" + utils.CamelCase(tr.RelationName)
-			tag.Comment = "设置与" + tr.RelationName + "多对多关系，中间表：" + tr.SourceName + "_has_" + tr.RelationName
+			tag.Comment = "设置与" + tr.RelationName + "多对多关系，中间表：" + tr.M2MThroungh
 			tag.ReverseMany = true
 		}
 	} else if getDirection == -1 {
 		rcol.Name = utils.CamelCase(tr.SourceName)
-		if tr.RelOne {
+		if tr.ReverseOne {
 			rcol.Type = "*" + utils.CamelCase(tr.SourceName)
-			tag.Comment = "设置与" + tr.SourceName + "一对一关系，该表为主表，字段：id为关联字段。"
-			tag.RelOne = true
+			tag.Comment = "设置与" + tr.SourceName + "一对一关系，该表为扩展表，字段：id为关联字段。"
+			tag.ReverseOne = true
 		} else if tr.RelM2M {
 			rcol.Name = rcol.Name + "s"
 			rcol.Type = "[]*" + utils.CamelCase(tr.SourceName)
-			tag.Comment = "设置与" + tr.SourceName + "多对多关系，中间表：" + tr.SourceName + "_has_" + tr.RelationName
+			tag.Comment = "设置与" + tr.SourceName + "多对多关系，中间表：" + tr.M2MThroungh
+			tag.M2MThroungh = tr.M2MThroungh
 			tag.RelM2M = true
 		} else if tr.ReverseMany {
 			rcol.Name = rcol.Name + "s"
@@ -1159,6 +1217,8 @@ func Get{{modelName}}ById(id int) (v *{{modelName}}, err error) {
 	o := orm.NewOrm()
 	v = &{{modelName}}{Id: id}
 	if err = o.Read(v); err == nil {
+		//e.g.关联字段（结构）赋nil，避免取到默认值
+		{{relationBestowNil}}
 		return v, nil
 	}
 	return nil, err
@@ -1224,11 +1284,15 @@ func GetAll{{modelName}}(query map[string]string, fields []string, sortby []stri
 	if _, err = qs.Limit(limit, offset).All(&l, fields...); err == nil {
 		if len(fields) == 0 {
 			for _, v := range l {
+				//e.g.关联字段（结构）赋nil，避免取到默认值
+				{{relationBestowNil}}
 				ml = append(ml, v)
 			}
 		} else {
 			// trim unused fields
 			for _, v := range l {
+				//e.g.关联字段（结构）赋nil，避免取到默认值
+				{{relationBestowNil}}
 				m := make(map[string]interface{})
 				val := reflect.ValueOf(v)
 				for _, fname := range fields {
