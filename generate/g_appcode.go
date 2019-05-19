@@ -1221,6 +1221,13 @@ func init() {
 	orm.RegisterModel(new({{modelName}}))
 }
 
+//载入关系字段
+func (t *{{modelName}}) LoadRelatedOf(r string, args ...interface{}) (int64, error) {
+	o := orm.NewOrm()
+	num, err := o.LoadRelated(t, r, args)
+	return num, err
+}
+
 // Add{{modelName}} insert a new {{modelName}} into database and returns
 // last inserted Id on success.
 func Add{{modelName}}(m *{{modelName}}) (id int64, err error) {
