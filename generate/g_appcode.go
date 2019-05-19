@@ -148,7 +148,8 @@ type Table struct {
 	Fk            map[string]*ForeignKey
 	Columns       []*Column
 	ImportTimePkg bool
-	one2one       []string
+	Relation      []string
+	one2one       map[string]string
 	one2many      map[string]string
 	m2m           map[string]string
 }
@@ -401,6 +402,7 @@ func getTableObjects(tableNames []string, db *sql.DB, dbTransformer DbTransforme
 		dbTransformer.GetColumns(db, tb, blackList)
 	}
 
+	//打印表间关系列表
 	// fmt.Println(trlist)
 	//因为一对一关系的关联字段也是_id，且_one用于标识一对一关系时也增加tr，所以需要对list去重
 	//以关联表明为key去重
@@ -416,9 +418,9 @@ func getTableObjects(tableNames []string, db *sql.DB, dbTransformer DbTransforme
 			trmap[tr.SourceName+tr.RelationName] = tr
 		}
 	}
+	//打印表间关系去重后的map
 	// fmt.Println(trmap)
 
-	// fmt.Println(trlist)
 	for _, tb := range tables {
 		//先处理逆向的关系，如所有表中找到名为RelationName的表，进入处理
 		//TableRelation中的isCorrect会被置为True
@@ -503,7 +505,6 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 		trm2m.RelationName = table.Name[strings.LastIndex(table.Name, "_has_")+5 : len(table.Name)]
 		trm2m.RelM2M = true
 		trm2m.ReverseMany = true
-		// fmt.Println(*trm2m)
 		trlist = append(trlist, *trm2m)
 	}
 
@@ -645,7 +646,6 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 			}
 		}
 		if trFlag {
-			// fmt.Println(tr)
 			trlist = append(trlist, *tr)
 		} else {
 			col.Tag = tag
@@ -710,13 +710,14 @@ func GetRelationColumns(table *Table, tr TableRelation, getDirection int8) {
 			tag.ReverseMany = true
 		}
 	}
-	table.one2one = append(table.one2one, rcol.Name)
-	// fmt.Println(tr)
-	// fmt.Println(tag.Comment)
+	table.Relation = append(table.Relation, rcol.Name)
+	//打印会插入的到struct的关系对象
+	// fmt.Println(tag)
 	rcol.Tag = tag
 	table.Columns = append(table.Columns, rcol)
 }
 
+//关系字段默认处理为nil，避免取到默认值
 func RelationDealNil(l []string) string {
 	var ls string
 	for _, v := range l {
@@ -982,8 +983,9 @@ func writeModelFiles(tables []*Table, mPath string) {
 				continue
 			}
 		}
-		var dealNil = RelationDealNil(tb.one2one)
-		fmt.Println(tb.one2one)
+		var dealNil = RelationDealNil(tb.Relation)
+		//打印由表间关系产生的struct元素
+		// fmt.Println(tb.Relation)
 		var template string
 		if tb.Pk == "" {
 			template = StructModelTPL
