@@ -1252,10 +1252,10 @@ func Get{{modelName}}ById(id int) (v *{{modelName}}, err error) {
 // 入参为limit和offset，返回对象列表，方便使用分页查询
 // GetLimit{{modelName}} retrieves limit {{modelName}} matches certain condition. Returns empty list if
 // no records exist
-func GetLimit{{modelName}}(offset int64, limit int64) (ml []{{modelName}}, err error) {
+func GetLimit{{modelName}}(offset int64, limit int64) (ml []*{{modelName}}, err error) {
 	o := orm.NewOrm()
 	qs := o.QueryTable(new({{modelName}}))
-	var l []{{modelName}}
+	var l []*{{modelName}}
 	if _, err = qs.Limit(limit, offset).All(&l); err == nil {
 		for _, v := range l {
 			//e.g.关联字段（结构）赋nil，避免取到默认值
