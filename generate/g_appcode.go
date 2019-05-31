@@ -42,7 +42,6 @@ type DbTransformer interface {
 	GetTableNames(conn *sql.DB) []string
 	GetConstraints(conn *sql.DB, table *Table, blackList map[string]bool)
 	GetColumns(conn *sql.DB, table *Table, blackList map[string]bool)
-	// GetRelationColumns(table *Table, tr *TableRelation, getDirection int8)
 	GetGoDataType(sqlType string) (string, error)
 }
 
@@ -174,9 +173,10 @@ type TableRelation struct {
 
 // Column reprsents a column for a table
 type Column struct {
-	Name string
-	Type string
-	Tag  *OrmTag
+	Name   string
+	Type   string
+	IsNeed bool
+	Tag    *OrmTag
 }
 
 // ForeignKey represents a foreign key column for a table
@@ -225,6 +225,9 @@ func (tb *Table) String() string {
 // String returns the source code string of a field in Table struct
 // It maps to a column in database table. e.g. Id int `orm:"column(id);auto"`
 func (col *Column) String() string {
+	if !col.IsNeed {
+		return fmt.Sprintf("")
+	}
 	return fmt.Sprintf("%s %s %s", col.Name, col.Type, col.Tag.String())
 }
 
@@ -425,15 +428,15 @@ func getTableObjects(tableNames []string, db *sql.DB, dbTransformer DbTransforme
 		//先处理逆向的关系，如所有表中找到名为RelationName的表，进入处理
 		//TableRelation中的isCorrect会被置为True
 		for _, tr := range trmap {
-			var correcttr = tr
 			// correcttr.IsCorrect = true
 			if tb.Name == tr.RelationName {
+				var correcttr = tr
 				if !strings.Contains(tr.SourceName, "_has_") {
 					GetRelationColumns(tb, tr, -1)
 				}
 				correcttr.IsCorrect = true
+				correcttrlist = append(correcttrlist, correcttr)
 			}
-			correcttrlist = append(correcttrlist, correcttr)
 		}
 	}
 	for _, tb := range tables {
@@ -441,6 +444,12 @@ func getTableObjects(tableNames []string, db *sql.DB, dbTransformer DbTransforme
 		for _, tr := range correcttrlist {
 			if tb.Name == tr.SourceName && tr.IsCorrect == true {
 				GetRelationColumns(tb, tr, 1)
+				//beego orm要求，不可以生成带关系的_id字段
+				for _, c := range tb.Columns {
+					if c.Tag.Column == (tr.RelationName + "_id") {
+						c.IsNeed = false
+					}
+				}
 			}
 		}
 	}
@@ -546,6 +555,7 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 		col := new(Column)
 		col.Name = utils.CamelCase(colName)
 		col.Type, err = mysqlDB.GetGoDataType(dataType)
+		col.IsNeed = true
 		if err != nil {
 			beeLogger.Log.Fatalf("%s", err)
 		}
@@ -627,6 +637,7 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 				tr.RelOne = true
 				tr.ReverseOne = true
 				trFlag = true
+				col.IsNeed = false
 			} else if strings.HasSuffix(colName, "_id") {
 				//同上，表中含_id结尾的字段，约定判断_id前的编码为表编码，该表为从表。
 				tr.MarkName = "one2many"
@@ -634,6 +645,7 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 				tr.RelO2M = true
 				tr.ReverseMany = true
 				trFlag = true
+				col.IsNeed = true
 			}
 		} else {
 			if strings.HasSuffix(colName, "_id") {
@@ -643,13 +655,15 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 				tr.RelO2M = true
 				tr.ReverseMany = false
 				trFlag = true
+				col.IsNeed = false
 			}
+		}
+		if col.IsNeed {
+			col.Tag = tag
+			table.Columns = append(table.Columns, col)
 		}
 		if trFlag {
 			trlist = append(trlist, *tr)
-		} else {
-			col.Tag = tag
-			table.Columns = append(table.Columns, col)
 		}
 	}
 }
@@ -659,6 +673,7 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 func GetRelationColumns(table *Table, tr TableRelation, getDirection int8) {
 	// create a column
 	rcol := new(Column)
+	rcol.IsNeed = true
 
 	// Tag info
 	tag := new(OrmTag)
