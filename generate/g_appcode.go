@@ -1692,7 +1692,7 @@ func (c *{{ctrlName}}Controller) PutDelete() {
 		// v.Dr = 1
 		// o := orm.NewOrm()
 		// o.Update(v, "Dr")
-		c.jsonResult(200, "删除成功!", nil)
+		c.jsonResult(200, "删除成功!", v)
 	}
 }
 `
