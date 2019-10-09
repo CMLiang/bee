@@ -1517,23 +1517,27 @@ func (c *{{ctrlName}}Controller) URLMapping() {
 // Post ...
 // @Title Post
 // @Description create {{ctrlName}}
-// @Param	body		body 	models.{{ctrlName}}	true		"body for {{ctrlName}} content"
-// @Success 201 {int} models.{{ctrlName}}
+// @Param	body		body 	dto.{{ctrlName}}DTO	true		"body for {{ctrlName}} content"
+// @Success 201 {int} dto.{{ctrlName}}DTO
 // @Failure 403 body is empty
 // @router / [post]
 func (c *{{ctrlName}}Controller) Post() {
 	var v models.{{ctrlName}}
-	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &v); err == nil {
-		if _, err := models.Add{{ctrlName}}(&v); err == nil {
+	var vdto dto.{{ctrlName}}DTO
+	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &vdto); err == nil {
+		jsonM, _ := json.Marshal(&vdto)
+		json.Unmarshal(jsonM, &v)
+		// 如果业务上有新增初始化字段，在这里补充
+		
+		if uid, err := models.Add{{ctrlName}}(&v); err == nil {
 			c.Ctx.Output.SetStatus(201)
-			c.Data["json"] = v
+			c.jsonResult(200, "新增成功!", uid)
 		} else {
-			c.Data["json"] = err.Error()
+			c.jsonResult(400, "新增失败!", nil)
 		}
 	} else {
-		c.Data["json"] = err.Error()
+		c.jsonResult(400, "Request Body解析失败!", nil)
 	}
-	c.ServeJSON()
 }
 
 // GetOne ...
@@ -1648,8 +1652,8 @@ func (c *{{ctrlName}}Controller) GetAllByPage() {
 // @Title Put
 // @Description update the {{ctrlName}}
 // @Param	id		path 	string	true		"The id you want to update"
-// @Param	body		body 	{{ctrlName}}DTO	true		"body for {{ctrlName}} content"
-// @Success 200 {object} {{ctrlName}}DTO
+// @Param	body		body 	dto.{{ctrlName}}DTO	true		"body for {{ctrlName}} content"
+// @Success 200 {object} dto.{{ctrlName}}DTO
 // @Failure 403 :id is not int
 // @router /:id [put]
 func (c *{{ctrlName}}Controller) Put() {
