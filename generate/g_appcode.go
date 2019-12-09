@@ -42,7 +42,6 @@ type DbTransformer interface {
 	GetTableNames(conn *sql.DB) []string
 	GetConstraints(conn *sql.DB, table *Table, blackList map[string]bool)
 	GetColumns(conn *sql.DB, table *Table, blackList map[string]bool)
-	// GetRelationColumns(table *Table, tr *TableRelation, getDirection int8)
 	GetGoDataType(sqlType string) (string, error)
 }
 
@@ -62,6 +61,7 @@ var dbDriver = map[string]DbTransformer{
 
 type MvcPath struct {
 	ModelPath      string
+	DTOPath        string
 	ControllerPath string
 	RouterPath     string
 }
@@ -174,9 +174,10 @@ type TableRelation struct {
 
 // Column reprsents a column for a table
 type Column struct {
-	Name string
-	Type string
-	Tag  *OrmTag
+	Name   string
+	Type   string
+	IsNeed bool
+	Tag    *OrmTag
 }
 
 // ForeignKey represents a foreign key column for a table
@@ -216,10 +217,54 @@ type OrmTag struct {
 func (tb *Table) String() string {
 	rv := fmt.Sprintf("type %s struct {\n", utils.CamelCase(tb.Name))
 	for _, v := range tb.Columns {
-		rv += v.String() + "\n"
+		if !v.IsNeed {
+			rv += ""
+		} else {
+			rv += v.String() + "\n"
+		}
 	}
 	rv += "}\n"
 	return rv
+}
+
+// String returns the source code string for the Table struct ********************[DTO]
+func (tb *Table) DTOString() string {
+	rv := fmt.Sprintf("type %s struct {\n", utils.CamelCase(tb.Name)+"DTO")
+	for _, v := range tb.Columns {
+		if !v.IsNeed {
+			rv += ""
+		} else {
+			rv += v.DTOString() + "\n"
+		}
+	}
+	rv += "}\n\n"
+	return rv
+}
+
+// String returns the source code string for the Table struct ********************[DTO]
+func (tb *Table) RlString() string {
+	rv := fmt.Sprintf("type %s struct {\n", utils.CamelCase(tb.Name)+"Rl")
+	rv += fmt.Sprintf("%s %s %s", "Id", "int", "//关联关系字段"+"\n")
+	rv += "}\n\n"
+	return rv
+}
+
+// String returns the source code string of a field in Table struct
+// It maps to a column in database table. e.g. Id int `orm:"column(id);auto"`********************[DTO]
+func (col *Column) DTOString() string {
+	if strings.Index(col.Type, "*") != -1 {
+		return fmt.Sprintf("%s %s %s", col.Name, col.Type+"Rl", col.Tag.NoOrmString())
+	}
+	return fmt.Sprintf("%s %s %s", col.Name, col.Type, col.Tag.NoOrmString())
+}
+
+// String returns the ORM tag string for a column********************[DTO]
+func (tag *OrmTag) NoOrmString() string {
+	if tag.Comment != "" {
+		return fmt.Sprintf("/*Comment:`\"%s\"*/", tag.Comment)
+	} else {
+		return fmt.Sprintf("/*Comment:`\"%s\"*/", "无")
+	}
 }
 
 // String returns the source code string of a field in Table struct
@@ -355,6 +400,7 @@ func gen(dbms, connStr string, mode byte, selectedTableNames map[string]bool, ap
 		tables := getTableObjects(tableNames, db, trans)
 		mvcPath := new(MvcPath)
 		mvcPath.ModelPath = path.Join(apppath, "models")
+		mvcPath.DTOPath = path.Join(mvcPath.ModelPath, "dto")
 		mvcPath.ControllerPath = path.Join(apppath, "controllers")
 		mvcPath.RouterPath = path.Join(apppath, "routers")
 		createPaths(mode, mvcPath)
@@ -425,15 +471,15 @@ func getTableObjects(tableNames []string, db *sql.DB, dbTransformer DbTransforme
 		//先处理逆向的关系，如所有表中找到名为RelationName的表，进入处理
 		//TableRelation中的isCorrect会被置为True
 		for _, tr := range trmap {
-			var correcttr = tr
 			// correcttr.IsCorrect = true
 			if tb.Name == tr.RelationName {
+				var correcttr = tr
 				if !strings.Contains(tr.SourceName, "_has_") {
 					GetRelationColumns(tb, tr, -1)
 				}
 				correcttr.IsCorrect = true
+				correcttrlist = append(correcttrlist, correcttr)
 			}
-			correcttrlist = append(correcttrlist, correcttr)
 		}
 	}
 	for _, tb := range tables {
@@ -441,6 +487,12 @@ func getTableObjects(tableNames []string, db *sql.DB, dbTransformer DbTransforme
 		for _, tr := range correcttrlist {
 			if tb.Name == tr.SourceName && tr.IsCorrect == true {
 				GetRelationColumns(tb, tr, 1)
+				//beego orm要求，不可以生成带关系的_id字段
+				for _, c := range tb.Columns {
+					if c.Tag.Column == (tr.RelationName + "_id") {
+						c.IsNeed = false
+					}
+				}
 			}
 		}
 	}
@@ -546,6 +598,7 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 		col := new(Column)
 		col.Name = utils.CamelCase(colName)
 		col.Type, err = mysqlDB.GetGoDataType(dataType)
+		col.IsNeed = true
 		if err != nil {
 			beeLogger.Log.Fatalf("%s", err)
 		}
@@ -627,6 +680,7 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 				tr.RelOne = true
 				tr.ReverseOne = true
 				trFlag = true
+				col.IsNeed = false
 			} else if strings.HasSuffix(colName, "_id") {
 				//同上，表中含_id结尾的字段，约定判断_id前的编码为表编码，该表为从表。
 				tr.MarkName = "one2many"
@@ -634,6 +688,7 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 				tr.RelO2M = true
 				tr.ReverseMany = true
 				trFlag = true
+				col.IsNeed = true
 			}
 		} else {
 			if strings.HasSuffix(colName, "_id") {
@@ -643,13 +698,15 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 				tr.RelO2M = true
 				tr.ReverseMany = false
 				trFlag = true
+				col.IsNeed = false
 			}
+		}
+		if col.IsNeed {
+			col.Tag = tag
+			table.Columns = append(table.Columns, col)
 		}
 		if trFlag {
 			trlist = append(trlist, *tr)
-		} else {
-			col.Tag = tag
-			table.Columns = append(table.Columns, col)
 		}
 	}
 }
@@ -659,6 +716,7 @@ func (mysqlDB *MysqlDB) GetColumns(db *sql.DB, table *Table, blackList map[strin
 func GetRelationColumns(table *Table, tr TableRelation, getDirection int8) {
 	// create a column
 	rcol := new(Column)
+	rcol.IsNeed = true
 
 	// Tag info
 	tag := new(OrmTag)
@@ -928,6 +986,7 @@ func (*PostgresDB) GetGoDataType(sqlType string) (string, error) {
 func createPaths(mode byte, paths *MvcPath) {
 	if (mode & OModel) == OModel {
 		os.Mkdir(paths.ModelPath, 0777)
+		os.Mkdir(paths.DTOPath, 0777)
 	}
 	if (mode & OController) == OController {
 		os.Mkdir(paths.ControllerPath, 0777)
@@ -943,6 +1002,7 @@ func createPaths(mode byte, paths *MvcPath) {
 func writeSourceFiles(pkgPath string, tables []*Table, mode byte, paths *MvcPath) {
 	if (OModel & mode) == OModel {
 		beeLogger.Log.Info("Creating model files...")
+		writeDTOModelFile(tables, paths.DTOPath)
 		writeModelFiles(tables, paths.ModelPath)
 	}
 	if (OController & mode) == OController {
@@ -1015,9 +1075,75 @@ func writeModelFiles(tables []*Table, mPath string) {
 	}
 }
 
+// writeDTOModelFile generates model files
+func writeDTOModelFile(tables []*Table, mPath string) {
+	w := colors.NewColorWriter(os.Stdout)
+
+	filename := getFileName("dto_model")
+	fpath := path.Join(mPath, filename+".go")
+	var f *os.File
+	var err error
+	if utils.IsExist(fpath) {
+		beeLogger.Log.Warnf("'%s' already exists. Do you want to overwrite it? [Y|N] ", fpath)
+		if utils.AskForConfirmation() {
+			f, err = os.OpenFile(fpath, os.O_RDWR|os.O_TRUNC, 0666)
+			if err != nil {
+				beeLogger.Log.Warnf("%s", err)
+			}
+		} else {
+			beeLogger.Log.Warnf("Skipped create file '%s'", fpath)
+		}
+	} else {
+		f, err = os.OpenFile(fpath, os.O_CREATE|os.O_RDWR, 0666)
+		if err != nil {
+			beeLogger.Log.Warnf("%s", err)
+		}
+	}
+	packageStr := fmt.Sprintf("package dto\nimport \"time\"\n")
+	if _, err := f.WriteString(packageStr); err != nil {
+		beeLogger.Log.Fatalf("Could not write dto_model file to '%s': %s", fpath, err)
+	}
+	for _, tb := range tables {
+		fileStr := tb.DTOString()
+		fileStr += tb.RlString()
+		if _, err := f.WriteString(fileStr); err != nil {
+			beeLogger.Log.Fatalf("Could not write dto_model file to '%s': %s", fpath, err)
+		}
+	}
+	utils.CloseFile(f)
+	fmt.Fprintf(w, "\t%s%screate%s\t %s%s\n", "\x1b[32m", "\x1b[1m", "\x1b[21m", fpath, "\x1b[0m")
+	utils.FormatSourceCode(fpath)
+}
+
 // writeControllerFiles generates controller files
 func writeControllerFiles(tables []*Table, cPath string, pkgPath string) {
 	w := colors.NewColorWriter(os.Stdout)
+
+	fpath := path.Join(cPath, "BaseController.go")
+	var f *os.File
+	var err error
+	if utils.IsExist(fpath) {
+		beeLogger.Log.Warnf("'%s' already exists. Do you want to overwrite it? [Y|N] ", fpath)
+		if utils.AskForConfirmation() {
+			f, err = os.OpenFile(fpath, os.O_RDWR|os.O_TRUNC, 0666)
+			if err != nil {
+				beeLogger.Log.Warnf("%s", err)
+			}
+		} else {
+			beeLogger.Log.Warnf("Skipped create file '%s'", fpath)
+		}
+	} else {
+		f, err = os.OpenFile(fpath, os.O_CREATE|os.O_RDWR, 0666)
+		if err != nil {
+			beeLogger.Log.Warnf("%s", err)
+		}
+	}
+	if _, err := f.WriteString(BaseController); err != nil {
+		beeLogger.Log.Fatalf("Could not write controller file to '%s': %s", fpath, err)
+	}
+	utils.CloseFile(f)
+	fmt.Fprintf(w, "\t%s%screate%s\t %s%s\n", "\x1b[32m", "\x1b[1m", "\x1b[21m", fpath, "\x1b[0m")
+	utils.FormatSourceCode(fpath)
 
 	for _, tb := range tables {
 		if tb.Pk == "" {
@@ -1364,155 +1490,191 @@ func Delete{{modelName}}(id int) (err error) {
 	CtrlTPL = `package controllers
 
 import (
-	"{{pkgPath}}/models"
 	"encoding/json"
-	"errors"
+	"{{pkgPath}}/models"
+	"{{pkgPath}}/models/dto"
+	"{{pkgPath}}/utils"
 	"strconv"
-	"strings"
 
-	"github.com/astaxie/beego"
+	"github.com/astaxie/beego/orm"
 )
 
 // {{ctrlName}}Controller operations for {{ctrlName}}
 type {{ctrlName}}Controller struct {
-	beego.Controller
+	BaseController
 }
 
 // URLMapping ...
 func (c *{{ctrlName}}Controller) URLMapping() {
 	c.Mapping("Post", c.Post)
 	c.Mapping("GetOne", c.GetOne)
-	c.Mapping("GetAll", c.GetAll)
+	c.Mapping("GetOneByQuery", c.GetOneByQuery)
+	c.Mapping("GetAllByPage", c.GetAllByPage)
 	c.Mapping("Put", c.Put)
-	c.Mapping("Delete", c.Delete)
+	c.Mapping("PutDelete", c.PutDelete)
 }
 
 // Post ...
 // @Title Post
 // @Description create {{ctrlName}}
-// @Param	body		body 	models.{{ctrlName}}	true		"body for {{ctrlName}} content"
-// @Success 201 {int} models.{{ctrlName}}
+// @Param	body		body 	dto.{{ctrlName}}DTO	true		"body for {{ctrlName}} content"
+// @Success 201 {int} dto.{{ctrlName}}DTO
 // @Failure 403 body is empty
 // @router / [post]
 func (c *{{ctrlName}}Controller) Post() {
 	var v models.{{ctrlName}}
-	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &v); err == nil {
-		if _, err := models.Add{{ctrlName}}(&v); err == nil {
+	var vdto dto.{{ctrlName}}DTO
+	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &vdto); err == nil {
+		jsonM, _ := json.Marshal(&vdto)
+		json.Unmarshal(jsonM, &v)
+		// 如果业务上有新增初始化字段，在这里补充
+		
+		if uid, err := models.Add{{ctrlName}}(&v); err == nil {
 			c.Ctx.Output.SetStatus(201)
-			c.Data["json"] = v
+			c.jsonResult(200, "新增成功!", uid)
 		} else {
-			c.Data["json"] = err.Error()
+			c.jsonResult(400, "新增失败!", nil)
 		}
 	} else {
-		c.Data["json"] = err.Error()
+		c.jsonResult(400, "Request Body解析失败!", nil)
 	}
-	c.ServeJSON()
 }
 
 // GetOne ...
 // @Title Get One
 // @Description get {{ctrlName}} by id
 // @Param	id		path 	string	true		"The key for staticblock"
-// @Success 200 {object} models.{{ctrlName}}
+// @Success 200 {object} dto.{{ctrlName}}DTO
 // @Failure 403 :id is empty
 // @router /:id [get]
 func (c *{{ctrlName}}Controller) GetOne() {
+	var dtoone dto.{{ctrlName}}DTO
 	idStr := c.Ctx.Input.Param(":id")
 	id, _ := strconv.Atoi(idStr)
 	v, err := models.Get{{ctrlName}}ById(id)
 	if err != nil {
-		c.Data["json"] = err.Error()
+		c.jsonResult(400, "查询错误!", nil)
 	} else {
-		c.Data["json"] = v
+		// 可以在这里写载入关系
+		// v.LoadRelatedOf("Order")
+
+		jsonM, _ := json.Marshal(v)
+		json.Unmarshal(jsonM, &dtoone)
+		c.jsonResult(200, "OK!", dtoone)
 	}
-	c.ServeJSON()
 }
 
-// GetAll ...
-// @Title Get All
-// @Description get {{ctrlName}}
-// @Param	query	query	string	false	"Filter. e.g. col1:v1,col2:v2 ..."
-// @Param	fields	query	string	false	"Fields returned. e.g. col1,col2 ..."
-// @Param	sortby	query	string	false	"Sorted-by fields. e.g. col1,col2 ..."
-// @Param	order	query	string	false	"Order corresponding to each sortby field, if single value, apply to all sortby fields. e.g. desc,asc ..."
-// @Param	limit	query	string	false	"Limit the size of result set. Must be an integer"
-// @Param	offset	query	string	false	"Start position of result set. Must be an integer"
-// @Success 200 {object} models.{{ctrlName}}
-// @Failure 403
-// @router / [get]
-func (c *{{ctrlName}}Controller) GetAll() {
-	var fields []string
-	var sortby []string
-	var order []string
-	var query = make(map[string]string)
-	var limit int64 = 10
-	var offset int64
-
-	// fields: col1,col2,entity.col3
-	if v := c.GetString("fields"); v != "" {
-		fields = strings.Split(v, ",")
+// GetOneByQuery ...
+// @Title Get One By Query
+// @Description get {{ctrlName}} by query param
+// @Param	openid	query	string	true	"例如Openid是唯一字段"
+// @Success 200 {object} dto.{{ctrlName}}DTO
+// @Failure 403 openid is empty
+// @router /by [get]
+func (c *{{ctrlName}}Controller) GetOneByQuery() {
+	var dtoone dto.{{ctrlName}}DTO
+	var openid string
+	openid = c.GetString("openid")
+	if openid == "" || openid == "undefined" {
+		c.jsonResult(400, "openid不能为空  !", nil)
 	}
-	// limit: 10 (default is 10)
-	if v, err := c.GetInt64("limit"); err == nil {
-		limit = v
-	}
-	// offset: 0 (default is 0)
-	if v, err := c.GetInt64("offset"); err == nil {
-		offset = v
-	}
-	// sortby: col1,col2
-	if v := c.GetString("sortby"); v != "" {
-		sortby = strings.Split(v, ",")
-	}
-	// order: desc,asc
-	if v := c.GetString("order"); v != "" {
-		order = strings.Split(v, ",")
-	}
-	// query: k:v,k:v
-	if v := c.GetString("query"); v != "" {
-		for _, cond := range strings.Split(v, ",") {
-			kv := strings.SplitN(cond, ":", 2)
-			if len(kv) != 2 {
-				c.Data["json"] = errors.New("Error: invalid query key/value pair")
-				c.ServeJSON()
-				return
-			}
-			k, v := kv[0], kv[1]
-			query[k] = v
-		}
-	}
-
-	l, err := models.GetAll{{ctrlName}}(query, fields, sortby, order, offset, limit)
+	o := orm.NewOrm()
+	m := new(models.{{ctrlName}})
+	err := o.QueryTable(m).Filter("Dr", 0).Filter("openid", openid).One(m)
 	if err != nil {
-		c.Data["json"] = err.Error()
+		c.jsonResult(400, "查询错误!", nil)
 	} else {
-		c.Data["json"] = l
+		// 可以在这里写载入关系
+		// m.LoadRelatedOf("Order")
+
+		jsonM, _ := json.Marshal(m)
+		json.Unmarshal(jsonM, &dtoone)
+		c.jsonResult(200, "OK!", dtoone)
 	}
-	c.ServeJSON()
+}
+
+// GetAll By Page...
+// @Title Get All By Page
+// @Description get {{ctrlName}}
+// @Param	name	query	string	false	"模糊查询：名称"
+// @Param	p	query	string	false	"当前页码（默认1，可选）"
+// @Param	per	query	string	false	"每页行数（默认10，可选）"
+// @Success 200 {object} dto.{{ctrlName}}DTO
+// @Failure 403
+// @router /bypage [get]
+func (c *{{ctrlName}}Controller) GetAllByPage() {
+	//分页查询参数：p、per
+	var page int
+	var per int = 10
+	if v, err := c.GetInt("p"); err == nil {
+		page = v
+	}
+	if v, err := c.GetInt("per"); err == nil {
+		per = v
+	}
+	var nums int64
+	var name string
+
+	o := orm.NewOrm()
+	m := new(models.{{ctrlName}})
+	qs := o.QueryTable(m).Filter("Dr", 0)
+	name = c.GetString("name")
+	if name != "undefined" && name != "" {
+		qs = qs.Filter("Name__contains", name)
+	}
+	nums, _ = qs.Count()
+	pager := utils.NewPaginator(page, per, nums)
+	var ml []models.{{ctrlName}}
+	var dtol []dto.{{ctrlName}}DTO
+	_, err := qs.OrderBy("-updated_at").Limit(per, pager.Offset()).All(&ml)
+	if err == nil {
+		/*
+		A、如果要载入关系，用A这段
+		for _, one := range ml {
+			var onedto dto.{{ctrlName}}DTO
+			// 可以在这里写载入关系
+			one.LoadRelatedOf("Order")
+			jsonM, _ := json.Marshal(&one)
+			json.Unmarshal(jsonM, &onedto)
+			dtol = append(dtol, onedto)
+		}
+		*/
+		// 单表字段列表，默认用B这段
+		jsonM, _ := json.Marshal(&ml)
+		json.Unmarshal(jsonM, &dtol)
+		c.jsonResultByPage(200, "OK!", dtol, pager)
+	} else {
+		c.jsonResultByPage(400, "查询错误!", nil, pager)
+	}
 }
 
 // Put ...
 // @Title Put
 // @Description update the {{ctrlName}}
 // @Param	id		path 	string	true		"The id you want to update"
-// @Param	body		body 	models.{{ctrlName}}	true		"body for {{ctrlName}} content"
-// @Success 200 {object} models.{{ctrlName}}
+// @Param	body		body 	dto.{{ctrlName}}DTO	true		"body for {{ctrlName}} content"
+// @Success 200 {object} dto.{{ctrlName}}DTO
 // @Failure 403 :id is not int
 // @router /:id [put]
 func (c *{{ctrlName}}Controller) Put() {
 	idStr := c.Ctx.Input.Param(":id")
 	id, _ := strconv.Atoi(idStr)
-	v := models.{{ctrlName}}{Id: id}
-	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &v); err == nil {
-		if err := models.Update{{ctrlName}}ById(&v); err == nil {
-			c.Data["json"] = "OK"
+	var vdto dto.{{ctrlName}}DTO
+	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &vdto); err == nil {
+		v, _ := models.Get{{ctrlName}}ById(id)
+		// 过滤不可以修改的字段
+		jsonM, _ := json.Marshal(&vdto)
+		json.Unmarshal(jsonM, &v)
+		// 如果业务上有修改限制，在这里增加逻辑
+		
+		if err := models.Update{{ctrlName}}ById(v); err == nil {
+			c.jsonResult(200, "更新成功!", vdto)
 		} else {
-			c.Data["json"] = err.Error()
+			c.jsonResult(400, "更新失败!", nil)
 		}
 	} else {
-		c.Data["json"] = err.Error()
+		c.jsonResult(400, "Request Body解析失败!", nil)
 	}
-	c.ServeJSON()
 }
 
 // Delete ...
@@ -1521,16 +1683,21 @@ func (c *{{ctrlName}}Controller) Put() {
 // @Param	id		path 	string	true		"The id you want to delete"
 // @Success 200 {string} delete success!
 // @Failure 403 id is empty
-// @router /:id [delete]
-func (c *{{ctrlName}}Controller) Delete() {
+// @router /delete/:id [put]
+func (c *{{ctrlName}}Controller) PutDelete() {
 	idStr := c.Ctx.Input.Param(":id")
 	id, _ := strconv.Atoi(idStr)
-	if err := models.Delete{{ctrlName}}(id); err == nil {
-		c.Data["json"] = "OK"
+	v, err := models.Get{{ctrlName}}ById(id)
+	if err != nil {
+		c.jsonResult(400, "要删除的id不存在数据!", nil)
 	} else {
-		c.Data["json"] = err.Error()
+		// 如果业务上有删除限制，在这里增加逻辑
+		
+		// v.Dr = 1
+		// o := orm.NewOrm()
+		// o.Update(v, "Dr")
+		c.jsonResult(200, "删除成功!", v)
 	}
-	c.ServeJSON()
 }
 `
 	RouterTPL = `// @APIVersion 1.0.0
@@ -1562,4 +1729,51 @@ func init() {
 			),
 		),
 `
+	BaseController = `package controllers
+
+		import (
+			"github.com/astaxie/beego"
+		)
+		
+		type BaseController struct {
+			beego.Controller
+		}
+		
+		func (c *BaseController) Prepare() {
+			//附值
+			// c.controllerName, c.actionName = c.GetControllerAndAction()
+			//从Session里获取数据 设置用户信息
+			// c.adapterUserInfo()
+		}
+		
+		// JsonResult 用于返回ajax请求的基类
+		type JsonResult struct {
+			Code int    
+			Message  string 
+		}
+		
+		//返回json结果，并中断
+		func (c *BaseController) jsonResult(code int, msg string, data interface{}) {
+			r := &JsonResult{Code: code, Message: msg}
+			c.Data["json"] = map[string]interface{}{"Result": r, "Data": data}
+			c.ServeJSON()
+			c.StopRun()
+		}
+		
+		//返回json更多结果，并中断
+		func (c *BaseController) jsonResultMore(code int, msg string, data interface{}, m interface{}) {
+			r := &JsonResult{Code: code, Message: msg}
+			c.Data["json"] = map[string]interface{}{"Result": r, "Data": data, "More": m}
+			c.ServeJSON()
+			c.StopRun()
+		}
+		
+		//返回json分页结果，并中断
+		func (c *BaseController) jsonResultByPage(code int, msg string, data interface{}, p interface{}) {
+			r := &JsonResult{Code: code, Message: msg}
+			c.Data["json"] = map[string]interface{}{"Result": r, "Data": data, "Page": p}
+			c.ServeJSON()
+			c.StopRun()
+		}		
+		`
 )
