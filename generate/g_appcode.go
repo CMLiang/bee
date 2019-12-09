@@ -1580,7 +1580,7 @@ func (c *{{ctrlName}}Controller) GetOneByQuery() {
 	}
 	o := orm.NewOrm()
 	m := new(models.{{ctrlName}})
-	err := o.QueryTable(m).Filter("Dr", 0).Filter("openid", openid).One(m)
+	err := o.QueryTable(m).Filter("openid", openid).One(m)
 	if err != nil {
 		c.jsonResult(400, "查询错误!", nil)
 	} else {
@@ -1617,7 +1617,7 @@ func (c *{{ctrlName}}Controller) GetAllByPage() {
 
 	o := orm.NewOrm()
 	m := new(models.{{ctrlName}})
-	qs := o.QueryTable(m).Filter("Dr", 0)
+	qs := o.QueryTable(m)
 	name = c.GetString("name")
 	if name != "undefined" && name != "" {
 		qs = qs.Filter("Name__contains", name)
