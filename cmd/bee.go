@@ -17,22 +17,22 @@
 package cmd
 
 import (
-	"github.com/beego/bee/cmd/commands"
-	_ "github.com/beego/bee/cmd/commands/api"
-	_ "github.com/beego/bee/cmd/commands/bale"
-	_ "github.com/beego/bee/cmd/commands/beefix"
-	_ "github.com/beego/bee/cmd/commands/dlv"
-	_ "github.com/beego/bee/cmd/commands/dockerize"
-	_ "github.com/beego/bee/cmd/commands/generate"
-	_ "github.com/beego/bee/cmd/commands/hprose"
-	_ "github.com/beego/bee/cmd/commands/migrate"
-	_ "github.com/beego/bee/cmd/commands/new"
-	_ "github.com/beego/bee/cmd/commands/pack"
-	_ "github.com/beego/bee/cmd/commands/rs"
-	_ "github.com/beego/bee/cmd/commands/run"
-	_ "github.com/beego/bee/cmd/commands/server"
-	_ "github.com/beego/bee/cmd/commands/version"
-	"github.com/beego/bee/utils"
+	"bee2/cmd/commands"
+	_ "bee2/cmd/commands/api"
+	_ "bee2/cmd/commands/bale"
+	_ "bee2/cmd/commands/beefix"
+	_ "bee2/cmd/commands/dlv"
+	_ "bee2/cmd/commands/dockerize"
+	_ "bee2/cmd/commands/generate"
+	_ "bee2/cmd/commands/hprose"
+	_ "bee2/cmd/commands/migrate"
+	_ "bee2/cmd/commands/new"
+	_ "bee2/cmd/commands/pack"
+	_ "bee2/cmd/commands/rs"
+	_ "bee2/cmd/commands/run"
+	_ "bee2/cmd/commands/server"
+	_ "bee2/cmd/commands/version"
+	"bee2/utils"
 )
 
 func IfGenerateDocs(name string, args []string) bool {

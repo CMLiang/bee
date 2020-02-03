@@ -9,7 +9,7 @@ import (
 
 	"time"
 
-	beeLogger "github.com/beego/bee/logger"
+	beeLogger "bee2/logger"
 )
 
 // RuntimeInfo holds information about the current runtime.

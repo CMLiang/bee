@@ -24,10 +24,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/beego/bee/config"
-	beeLogger "github.com/beego/bee/logger"
-	"github.com/beego/bee/logger/colors"
-	"github.com/beego/bee/utils"
+	"bee2/config"
+	beeLogger "bee2/logger"
+	"bee2/logger/colors"
+	"bee2/utils"
 	"github.com/fsnotify/fsnotify"
 )
 
