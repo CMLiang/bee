@@ -3,7 +3,7 @@ package terminal
 import (
 	"bufio"
 	"fmt"
-	"github.com/derekparker/delve/service/api"
+	"github.com/go-delve/delve/service/api"
 	"io"
 	"path/filepath"
 	"text/tabwriter"

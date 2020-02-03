@@ -9,7 +9,7 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/derekparker/delve/proc"
+	"github.com/go-delve/delve/proc"
 	"golang.org/x/debug/dwarf"
 )
 

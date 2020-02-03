@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/derekparker/delve/dwarf/frame"
-	"github.com/derekparker/delve/dwarf/line"
-	"github.com/derekparker/delve/dwarf/reader"
+	"github.com/go-delve/delve/dwarf/frame"
+	"github.com/go-delve/delve/dwarf/line"
+	"github.com/go-delve/delve/dwarf/reader"
 	"golang.org/x/debug/dwarf"
 )
 
@@ -197,7 +197,7 @@ func (dbp *Process) FindFileLocation(fileName string, lineno int) (uint64, error
 // If lineOffset is passed FindFunctionLocation will return the address of that line
 // Pass lineOffset == 0 and firstLine == false if you want the address for the function's entry point
 // Note that setting breakpoints at that address will cause surprising behavior:
-// https://github.com/derekparker/delve/issues/170
+// https://github.com/go-delve/delve/issues/170
 func (dbp *Process) FindFunctionLocation(funcName string, firstLine bool, lineOffset int) (uint64, error) {
 	origfn := dbp.goSymTable.LookupFunc(funcName)
 	if origfn == nil {

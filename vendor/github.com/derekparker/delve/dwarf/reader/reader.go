@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"golang.org/x/debug/dwarf"
-	"github.com/derekparker/delve/dwarf/op"
+	"github.com/go-delve/delve/dwarf/op"
 )
 
 type Reader struct {

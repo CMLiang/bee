@@ -14,8 +14,8 @@ import (
 
 	sys "golang.org/x/sys/windows"
 
-	"github.com/derekparker/delve/dwarf/frame"
-	"github.com/derekparker/delve/dwarf/line"
+	"github.com/go-delve/delve/dwarf/frame"
+	"github.com/go-delve/delve/dwarf/line"
 	"golang.org/x/debug/dwarf"
 )
 
